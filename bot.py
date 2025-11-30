@@ -10,14 +10,15 @@ from telethon.tl.types import DocumentAttributeVideo
 logging.basicConfig(level=logging.INFO)
 
 # ------------------------------
-# ENV VARIABLES
+# TELEGRAM API CONFIG
 # ------------------------------
-API_ID = int(os.environ["API_ID"])
+API_ID = int(os.environ["API_ID"])      # Keep API_ID & API_HASH as env variables
 API_HASH = os.environ["API_HASH"]
-SESSION = os.environ.get("SESSION", "userbot")
-COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
 
-# Create cookies.txt if provided
+SESSION_FILE = "user"  # Hardcoded session filename (user.session)
+
+# Optional cookies
+COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
 COOKIES_FILE = None
 if COOKIE_TXT_CONTENT:
     COOKIES_FILE = "cookies.txt"
@@ -25,12 +26,14 @@ if COOKIE_TXT_CONTENT:
         f.write(COOKIE_TXT_CONTENT)
     logging.info("Cookies file created")
 
-# FFmpeg & FFprobe binary paths from imageio-ffmpeg
+# ------------------------------
+# FFmpeg & FFprobe paths
+# ------------------------------
 FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
-FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()  # ffprobe is included
+FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()  # ffprobe included
 
 # ------------------------------
-# VIDEO METADATA (ffprobe)
+# Video metadata (ffprobe)
 # ------------------------------
 def get_video_info(path):
     """Returns duration, width, height for Telegram streaming."""
@@ -51,7 +54,7 @@ def get_video_info(path):
     return 0, 0, 0  # fallback
 
 # ------------------------------
-# DOWNLOAD VIDEO USING YT-DLP + RE-MUX FOR STREAMING
+# Download video + make streamable
 # ------------------------------
 def download_video(url: str) -> str:
     ydl_opts = {
@@ -67,7 +70,7 @@ def download_video(url: str) -> str:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
 
-    # Re-mux for Telegram streaming (moov atom at start)
+    # Remux with ffmpeg to make Telegram streamable
     streamed_file = "streamable.mp4"
     cmd = [
         FFMPEG_BIN, "-i", filename,
@@ -84,12 +87,12 @@ def download_video(url: str) -> str:
     return streamed_file
 
 # ------------------------------
-# TELETHON USERBOT CLIENT
+# Telethon client
 # ------------------------------
-client = TelegramClient(SESSION, API_ID, API_HASH)
+client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
 
 # ------------------------------
-# MESSAGE HANDLER
+# Message handler
 # ------------------------------
 @client.on(events.NewMessage(outgoing=False))
 async def handler(event):
@@ -128,8 +131,8 @@ async def handler(event):
             os.remove(filepath)
 
 # ------------------------------
-# START USERBOT
+# Start userbot
 # ------------------------------
 print("Userbot Started...")
-client.start()
+client.start()  # Uses hardcoded user.session
 client.run_until_disconnected()
