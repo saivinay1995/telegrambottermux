@@ -4,43 +4,64 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-logging.basicConfig(level=logging.INFO)
+# ------------------- Logging -------------------
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-YOUR_USER_ID = int(os.environ["YOUR_USER_ID"])
-PUBLIC_URL = os.environ["PUBLIC_URL"]
-PORT = int(os.environ.get("PORT", 10000))
+# ------------------- Environment -------------------
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+YOUR_USER_ID = int(os.environ.get("YOUR_USER_ID"))
 
-# Handlers
+if not BOT_TOKEN or not YOUR_USER_ID:
+    raise Exception("BOT_TOKEN or YOUR_USER_ID environment variables not set!")
+
+# ------------------- Video Download -------------------
+def download_video(url: str) -> str:
+    """Download video using yt-dlp and return filename."""
+    ydl_opts = {
+        "outtmpl": "video.%(ext)s",
+        "format": "bestvideo+bestaudio/best",
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+    return filename
+
+# ------------------- Handlers -------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send me a video URL!")
+    await update.message.reply_text(
+        "Hi! Send me a video URL and I will download it to your Saved Messages."
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     if not url:
         return
-    await update.message.reply_text("Downloading...")
+    await update.message.reply_text("Downloading... ⏳")
     try:
-        filename = yt_dlp.YoutubeDL({"outtmpl":"video.%(ext)s"}).extract_info(url, download=True)["title"]+".mp4"
-        with open(filename, "rb") as f:
+        filepath = download_video(url)
+        with open(filepath, "rb") as f:
             await context.bot.send_document(chat_id=YOUR_USER_ID, document=f)
+        await update.message.reply_text("Sent to Saved Messages ✅")
     except Exception as e:
-        await update.message.reply_text(f"Failed: {e}")
+        await update.message.reply_text(f"Failed to download/send: {e}")
     finally:
-        if 'filename' in locals() and os.path.exists(filename):
-            os.remove(filename)
+        # Clean up downloaded file
+        if 'filepath' in locals() and os.path.exists(filepath):
+            os.remove(filepath)
 
-# Build application
+# ------------------- Application -------------------
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Run webhook
+# ------------------- Run Bot (Polling) -------------------
 if __name__ == "__main__":
-    webhook_url = f"{PUBLIC_URL}/webhook"
-    logging.info(f"Starting webhook at {webhook_url}")
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=webhook_url
-    )
+    logging.info("Bot is starting with long polling...")
+    app.run_polling()
