@@ -4,18 +4,22 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# ------------------- Logging -------------------
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 
-# ------------------- Environment -------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 YOUR_USER_ID = int(os.environ.get("YOUR_USER_ID"))
+COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")  # cookies stored here
 
 if not BOT_TOKEN or not YOUR_USER_ID:
     raise Exception("BOT_TOKEN or YOUR_USER_ID environment variables not set!")
+
+# Write cookies to a temporary file if environment variable is set
+COOKIES_FILE = None
+if COOKIE_TXT_CONTENT:
+    COOKIES_FILE = "cookies.txt"
+    with open(COOKIES_FILE, "w") as f:
+        f.write(COOKIE_TXT_CONTENT)
+    logging.info("Cookies file created from environment variable.")
 
 # ------------------- Video Download -------------------
 def download_video(url: str) -> str:
@@ -28,6 +32,9 @@ def download_video(url: str) -> str:
         "quiet": True,
         "no_warnings": True,
     }
+    if COOKIES_FILE:
+        ydl_opts["cookiefile"] = COOKIES_FILE  # use cookies if provided
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
@@ -35,9 +42,7 @@ def download_video(url: str) -> str:
 
 # ------------------- Handlers -------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Hi! Send me a video URL and I will download it to your Saved Messages."
-    )
+    await update.message.reply_text("Send me a video URL!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
@@ -50,9 +55,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_document(chat_id=YOUR_USER_ID, document=f)
         await update.message.reply_text("Sent to Saved Messages ✅")
     except Exception as e:
-        await update.message.reply_text(f"Failed to download/send: {e}")
+        await update.message.reply_text(f"Failed: {e}")
     finally:
-        # Clean up downloaded file
         if 'filepath' in locals() and os.path.exists(filepath):
             os.remove(filepath)
 
