@@ -11,21 +11,6 @@ YOUR_USER_ID = int(os.environ["YOUR_USER_ID"])
 PUBLIC_URL = os.environ["PUBLIC_URL"]
 PORT = int(os.environ.get("PORT", 10000))
 
-# yt-dlp download function
-def download_video(url: str) -> str:
-    ydl_opts = {
-        "outtmpl": "video.%(ext)s",
-        "format": "bestvideo+bestaudio/best",
-        "merge_output_format": "mp4",
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-    return filename
-
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Send me a video URL!")
@@ -34,17 +19,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     if not url:
         return
-    await update.message.reply_text("Downloading... ⏳")
+    await update.message.reply_text("Downloading...")
     try:
-        filepath = download_video(url)
-        with open(filepath, "rb") as f:
+        filename = yt_dlp.YoutubeDL({"outtmpl":"video.%(ext)s"}).extract_info(url, download=True)["title"]+".mp4"
+        with open(filename, "rb") as f:
             await context.bot.send_document(chat_id=YOUR_USER_ID, document=f)
-        await update.message.reply_text("Sent to Saved Messages ✅")
     except Exception as e:
         await update.message.reply_text(f"Failed: {e}")
     finally:
-        if 'filepath' in locals() and os.path.exists(filepath):
-            os.remove(filepath)
+        if 'filename' in locals() and os.path.exists(filename):
+            os.remove(filename)
 
 # Build application
 app = Application.builder().token(BOT_TOKEN).build()
