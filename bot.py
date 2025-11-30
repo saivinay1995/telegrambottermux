@@ -129,7 +129,7 @@ async def handler(event):
         await client.send_file(
             "me",  # Saved Messages
             filepath,
-            caption="Streamable video 🚀",
+            caption=`{video_name}`,
             attributes=[
                 DocumentAttributeVideo(
                     duration=duration,
