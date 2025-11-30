@@ -10,14 +10,17 @@ from telethon.tl.types import DocumentAttributeVideo
 logging.basicConfig(level=logging.INFO)
 
 # ------------------------------
-# ENV VARIABLES
+# TELEGRAM CONFIG
 # ------------------------------
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
-SESSION = os.environ.get("SESSION", "userbot")
+
+SESSION_FILE = "user"  # hardcoded, user.session must be in same folder
 COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
 
-# Create cookies.txt if provided
+# ------------------------------
+# Cookies support
+# ------------------------------
 COOKIES_FILE = None
 if COOKIE_TXT_CONTENT:
     COOKIES_FILE = "cookies.txt"
@@ -25,12 +28,14 @@ if COOKIE_TXT_CONTENT:
         f.write(COOKIE_TXT_CONTENT)
     logging.info("Cookies file created")
 
-# FFmpeg & FFprobe from imageio-ffmpeg
+# ------------------------------
+# FFmpeg & FFprobe
+# ------------------------------
 FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
 FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()  # ffprobe included
 
 # ------------------------------
-# VIDEO METADATA (ffprobe)
+# Video metadata
 # ------------------------------
 def get_video_info(path):
     cmd = [
@@ -50,7 +55,7 @@ def get_video_info(path):
     return 0, 0, 0
 
 # ------------------------------
-# DOWNLOAD VIDEO USING YT-DLP
+# Download + make streamable
 # ------------------------------
 def download_video(url: str) -> str:
     ydl_opts = {
@@ -66,7 +71,7 @@ def download_video(url: str) -> str:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
 
-    # Remux with FFmpeg to make it streamable
+    # Remux to streamable mp4
     streamable_file = "streamable.mp4"
     cmd = [
         FFMPEG_BIN, "-i", filename,
@@ -76,21 +81,21 @@ def download_video(url: str) -> str:
     ]
     subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Remove original download
+    # Remove original
     if os.path.exists(filename):
         os.remove(filename)
 
     return streamable_file
 
 # ------------------------------
-# TELETHON USERBOT CLIENT
+# TELETHON CLIENT
 # ------------------------------
-client = TelegramClient(SESSION, API_ID, API_HASH)
+client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
 
 # ------------------------------
-# MESSAGE HANDLER
+# Message handler
 # ------------------------------
-@client.on(events.NewMessage(outgoing=False))
+@client.on(events.NewMessage(outgoing=True))  # listen to own messages
 async def handler(event):
     url = event.message.message.strip()
     if not url.startswith("http"):
@@ -129,5 +134,5 @@ async def handler(event):
 # START USERBOT
 # ------------------------------
 print("Userbot Started...")
-client.start()
+client.start()  # uses user.session
 client.run_until_disconnected()
