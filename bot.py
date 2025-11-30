@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 
-SESSION_FILE = "user"  # Must exist in directory
+SESSION_FILE = "user"
 COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
 
 # ------------------------------
@@ -35,7 +35,7 @@ FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
 FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()
 
 # ------------------------------
-# Video metadata (duration, resolution)
+# Video metadata
 # ------------------------------
 def get_video_info(path):
     if not os.path.exists(path):
@@ -59,19 +59,17 @@ def get_video_info(path):
                 width = stream.get("width", 0)
                 height = stream.get("height", 0)
                 return duration, width, height
+
     except:
         return 0, 0, 0
 
     return 0, 0, 0
 
 # ------------------------------
-# Download + remux to FASTSTART MP4
+# Download + FASTSTART remux
 # ------------------------------
 def download_video(url: str) -> str:
 
-    # -------------------------------
-    # yt-dlp download
-    # -------------------------------
     ydl_opts = {
         "outtmpl": "video.%(ext)s",
         "format": "best",
@@ -89,9 +87,7 @@ def download_video(url: str) -> str:
         original_file = ydl.prepare_filename(info)
         download_video.last_title = info.get("title", os.path.basename(original_file))
 
-    # -------------------------------
-    # Remux to STREAMABLE MP4 using faststart
-    # -------------------------------
+    # Convert to streamable faststart MP4
     final_path = os.path.abspath("streamable.mp4")
 
     cmd = [
@@ -115,7 +111,7 @@ def download_video(url: str) -> str:
 client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
 
 # ------------------------------
-# Message handler
+# Message Handler
 # ------------------------------
 @client.on(events.NewMessage(outgoing=True))
 async def handler(event):
@@ -126,6 +122,8 @@ async def handler(event):
 
     await event.reply("Downloading... ⏳")
 
+    filepath = None  # <<< FIXED
+
     try:
         filepath = download_video(url)
         duration, width, height = get_video_info(filepath)
@@ -134,7 +132,7 @@ async def handler(event):
         await client.send_file(
             "me",
             filepath,
-            caption=video_name,
+            caption=video_name,     # send REAL video name
             attributes=[
                 DocumentAttributeVideo(
                     duration=duration,
@@ -152,11 +150,12 @@ async def handler(event):
         await event.reply(f"Error: {e}")
 
     finally:
-        if os.path.exists(filepath):
+        # <<< FIXED SAFE DELETE
+        if filepath and os.path.exists(filepath):
             os.remove(filepath)
 
 # ------------------------------
-# START USERBOT
+# Start
 # ------------------------------
 print("Userbot Started...")
 client.start()
