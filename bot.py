@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 
-SESSION_FILE = "user"  # Hardcoded user.session must exist in project root
+SESSION_FILE = "user"  # Hardcoded user.session must exist
 COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
 
 # ------------------------------
@@ -74,9 +74,11 @@ def get_video_info(path):
 def download_video(url: str) -> str:
     ydl_opts = {
         "outtmpl": "video.%(ext)s",
-        "format": "bestvideo+bestaudio/best",
+        "format": "bestaudio[ext=m4a]+bestvideo[ext=mp4]/best",
         "merge_output_format": "mp4",
         "noplaylist": True,
+        "ignoreerrors": True,
+        "quiet": True,
     }
     if COOKIES_FILE:
         ydl_opts["cookiefile"] = COOKIES_FILE
