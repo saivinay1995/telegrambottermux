@@ -7,10 +7,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# === Environment variables ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 YOUR_USER_ID = os.environ.get("YOUR_USER_ID")
-PUBLIC_URL = os.environ.get("PUBLIC_URL")  # Render service URL
+PUBLIC_URL = os.environ.get("PUBLIC_URL")
 
 if not BOT_TOKEN or not YOUR_USER_ID or not PUBLIC_URL:
     raise Exception("Please set BOT_TOKEN, YOUR_USER_ID, and PUBLIC_URL in Render environment variables")
@@ -18,8 +17,7 @@ if not BOT_TOKEN or not YOUR_USER_ID or not PUBLIC_URL:
 YOUR_USER_ID = int(YOUR_USER_ID)
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 
-
-# === yt-dlp download ===
+# yt-dlp download
 def download_video(url: str) -> str:
     ydl_opts = {
         "outtmpl": "downloaded.%(ext)s",
@@ -38,11 +36,9 @@ def download_video(url: str) -> str:
         filename = mp4_file
     return filename
 
-
-# === Handlers ===
+# Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Send me a video URL!")
-
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = (update.message.text or "").strip()
@@ -62,14 +58,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 'filepath' in locals() and os.path.exists(filepath):
             os.remove(filepath)
 
-
-# === Build Application ===
+# Build app
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-
-# === Run webhook for Render ===
+# Run webhook
 if __name__ == "__main__":
     webhook_url = PUBLIC_URL.rstrip("/") + WEBHOOK_PATH
     logger.info(f"Setting webhook: {webhook_url}")
