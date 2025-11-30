@@ -1,26 +1,26 @@
-# bot.py
 import os
-import logging
 import yt_dlp
+import logging
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")            # set in Render
-YOUR_USER_ID = int(os.environ.get("YOUR_USER_ID")) # set in Render
-PORT = int(os.environ.get("PORT", 8000))
-WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", f"/webhook/{BOT_TOKEN}")
-# public URL will be https://<your-service>.onrender.com + WEBHOOK_PATH
-PUBLIC_URL = os.environ.get("PUBLIC_URL")  # set to your Render service URL (see below)
+# === Environment variables ===
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+YOUR_USER_ID = os.environ.get("YOUR_USER_ID")
+PUBLIC_URL = os.environ.get("PUBLIC_URL")  # Render service URL
+
+if not BOT_TOKEN or not YOUR_USER_ID or not PUBLIC_URL:
+    raise Exception("Please set BOT_TOKEN, YOUR_USER_ID, and PUBLIC_URL in Render environment variables")
+
+YOUR_USER_ID = int(YOUR_USER_ID)
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 
 
-# === yt-dlp helper ===
-def download_with_ytdlp(url: str) -> str:
-    # saves to local file and returns filename
+# === yt-dlp download ===
+def download_video(url: str) -> str:
     ydl_opts = {
         "outtmpl": "downloaded.%(ext)s",
         "format": "bestvideo+bestaudio/best",
@@ -32,66 +32,51 @@ def download_with_ytdlp(url: str) -> str:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
-    # normalize extension to .mp4 if merged
-    if not filename.endswith(".mp4") and os.path.exists(filename):
-        base, _ = os.path.splitext(filename)
-        mp4 = f"{base}.mp4"
-        try:
-            os.rename(filename, mp4)
-            filename = mp4
-        except Exception:
-            pass
+    if not filename.endswith(".mp4"):
+        mp4_file = "video.mp4"
+        os.rename(filename, mp4_file)
+        filename = mp4_file
     return filename
 
 
 # === Handlers ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send me a video URL and I'll download & save it to your Saved Messages.")
+    await update.message.reply_text("Send me a video URL!")
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = (update.message.text or "").strip()
     if not url:
-        await update.message.reply_text("Please send a valid URL.")
+        await update.message.reply_text("Send a valid URL")
         return
-
     await update.message.reply_text("Downloading... ⏳")
     try:
-        filepath = download_with_ytdlp(url)
-        # send to Saved Messages (your user id)
+        filepath = download_video(url)
         with open(filepath, "rb") as f:
             await context.bot.send_document(chat_id=YOUR_USER_ID, document=f, caption="Downloaded via yt-dlp")
         await update.message.reply_text("Sent to Saved Messages ✅")
     except Exception as e:
-        logger.exception("Download/send failed")
+        logger.exception("Download failed")
         await update.message.reply_text(f"Failed: {e}")
     finally:
-        try:
-            if 'filepath' in locals() and os.path.exists(filepath):
-                os.remove(filepath)
-        except Exception:
-            pass
+        if 'filepath' in locals() and os.path.exists(filepath):
+            os.remove(filepath)
 
 
-# === App bootstrap & webhook setup ===
-def build_app():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    return app
+# === Build Application ===
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+
+# === Run webhook for Render ===
 if __name__ == "__main__":
-    app = build_app()
-
-    # Set webhook URL (Render gives you https://<service>.onrender.com)
-    if not PUBLIC_URL:
-        raise SystemExit("PUBLIC_URL environment variable not set. Set it to your Render service URL (e.g. https://my-bot.onrender.com)")
     webhook_url = PUBLIC_URL.rstrip("/") + WEBHOOK_PATH
-    logger.info("Setting webhook to %s", webhook_url)
+    logger.info(f"Setting webhook: {webhook_url}")
 
-    # start webhook (built-in run_webhook will host a simple webserver)
     app.run_webhook(
         listen="0.0.0.0",
-        port=PORT,
+        port=int(os.environ.get("PORT", 10000)),
         webhook_url=webhook_url,
         webhook_path=WEBHOOK_PATH
     )
