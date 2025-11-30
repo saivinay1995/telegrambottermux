@@ -1,17 +1,32 @@
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram import Update
 import os
 import yt_dlp
 import logging
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 YOUR_USER_ID = int(os.environ["YOUR_USER_ID"])
 PUBLIC_URL = os.environ["PUBLIC_URL"]
+PORT = int(os.environ.get("PORT", 10000))
 
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+# yt-dlp download function
+def download_video(url: str) -> str:
+    ydl_opts = {
+        "outtmpl": "video.%(ext)s",
+        "format": "bestvideo+bestaudio/best",
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+    return filename
 
+# Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Send me a video URL!")
 
@@ -19,22 +34,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     if not url:
         return
-    await update.message.reply_text("Downloading...")
+    await update.message.reply_text("Downloading... ⏳")
     try:
-        filename = yt_dlp.YoutubeDL({"outtmpl":"video.%(ext)s"}).extract_info(url, download=True)["title"]+".mp4"
-        with open(filename,"rb") as f:
+        filepath = download_video(url)
+        with open(filepath, "rb") as f:
             await context.bot.send_document(chat_id=YOUR_USER_ID, document=f)
+        await update.message.reply_text("Sent to Saved Messages ✅")
     except Exception as e:
         await update.message.reply_text(f"Failed: {e}")
+    finally:
+        if 'filepath' in locals() and os.path.exists(filepath):
+            os.remove(filepath)
 
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+# Build application
+app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+# Run webhook
 if __name__ == "__main__":
+    webhook_url = f"{PUBLIC_URL}/webhook"
+    logging.info(f"Starting webhook at {webhook_url}")
     app.run_webhook(
         listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-        webhook_url=PUBLIC_URL.rstrip("/") + WEBHOOK_PATH,
-        webhook_path=WEBHOOK_PATH
+        port=PORT,
+        webhook_url=webhook_url
     )
