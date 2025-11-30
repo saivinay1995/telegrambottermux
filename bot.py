@@ -85,21 +85,23 @@ def download_video(url: str) -> str:
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
+        original_filename = ydl.prepare_filename(info)
+        # store original video name for reply
+        download_video.last_video_name = info.get("title", os.path.basename(original_filename))
 
     # Remux to streamable mp4
     streamable_file = "streamable.mp4"
     cmd = [
-        FFMPEG_BIN, "-i", filename,
+        FFMPEG_BIN, "-i", original_filename,
         "-c", "copy",
         "-movflags", "faststart",
         streamable_file
     ]
     subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Remove original
-    if os.path.exists(filename):
-        os.remove(filename)
+    # Remove original download
+    if os.path.exists(original_filename):
+        os.remove(original_filename)
 
     return streamable_file
 
@@ -122,6 +124,7 @@ async def handler(event):
     try:
         filepath = download_video(url)
         duration, width, height = get_video_info(filepath)
+        video_name = download_video.last_video_name
 
         await client.send_file(
             "me",  # Saved Messages
@@ -138,7 +141,8 @@ async def handler(event):
             force_document=False,
         )
 
-        await event.reply("Uploaded as STREAMABLE video ✔")
+        # Send original video name in reply
+        await event.reply(f"Uploaded video: `{video_name}` ✔")
 
     except Exception as e:
         await event.reply(f"Error: {e}")
