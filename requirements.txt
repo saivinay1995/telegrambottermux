@@ -2,4 +2,4 @@ python-telegram-bot==20.7
 yt-dlp
 telethon
 python-telegram-bot[webhooks]==20.7
-aiohttp==3.9.9
+aiohttp
