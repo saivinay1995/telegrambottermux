@@ -1,71 +1,81 @@
 import os
 import yt_dlp
 import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telethon import TelegramClient, events
 
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-YOUR_USER_ID = int(os.environ.get("YOUR_USER_ID"))
-COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")  # cookies stored here
+API_ID = int(os.environ["API_ID"])
+API_HASH = os.environ["API_HASH"]
 
-if not BOT_TOKEN or not YOUR_USER_ID:
-    raise Exception("BOT_TOKEN or YOUR_USER_ID environment variables not set!")
+COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
+SESSION = "user.session"
 
-# Write cookies to a temporary file if environment variable is set
+# Write cookies file if provided
 COOKIES_FILE = None
 if COOKIE_TXT_CONTENT:
     COOKIES_FILE = "cookies.txt"
     with open(COOKIES_FILE, "w") as f:
         f.write(COOKIE_TXT_CONTENT)
-    logging.info("Cookies file created from environment variable.")
+    logging.info("Cookies.txt created.")
 
-# ------------------- Video Download -------------------
+client = TelegramClient(SESSION, API_ID, API_HASH)
+
+
+# ------------------- DOWNLOAD VIDEO -------------------
 def download_video(url: str) -> str:
-    """Download video using yt-dlp and return filename."""
     ydl_opts = {
         "outtmpl": "video.%(ext)s",
         "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
+        "noplaylist": True
     }
     if COOKIES_FILE:
-        ydl_opts["cookiefile"] = COOKIES_FILE  # use cookies if provided
+        ydl_opts["cookiefile"] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-    return filename
+        return ydl.prepare_filename(info)
 
-# ------------------- Handlers -------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send me a video URL!")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text.strip()
-    if not url:
-        return
-    await update.message.reply_text("Downloading... ⏳")
+# ------------------- STREAM UPLOAD -------------------
+async def stream_upload(filepath):
+    """
+    Uploads file to Saved Messages (Telegram cloud) using streaming.
+    Works for 2GB+ files.
+    """
+    await client.send_file(
+        "me",
+        filepath,
+        caption="Uploaded via userbot stream 🚀",
+        force_document=True,
+        part_size_kb=512,   # streaming chunk size
+        supports_streaming=True
+    )
+
+
+# ------------------- MESSAGE LISTENER -------------------
+@client.on(events.NewMessage(pattern=r"http"))
+async def url_handler(event):
+    url = event.raw_text.strip()
+
+    await event.reply("Downloading video… ⏳")
+
     try:
-        filepath = download_video(url)
-        with open(filepath, "rb") as f:
-            await context.bot.send_document(chat_id=YOUR_USER_ID, document=f)
-        await update.message.reply_text("Sent to Saved Messages ✅")
+        file_path = download_video(url)
+        await event.reply("Uploading to Saved Messages… ☁️")
+
+        await stream_upload(file_path)
+
+        await event.reply("Done! Check your Saved Messages ✅")
     except Exception as e:
-        await update.message.reply_text(f"Failed: {e}")
+        await event.reply(f"Error: {e}")
     finally:
-        if 'filepath' in locals() and os.path.exists(filepath):
-            os.remove(filepath)
+        if os.path.exists("video.mp4"):
+            os.remove("video.mp4")
 
-# ------------------- Application -------------------
-app = Application.builder().token(BOT_TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# ------------------- Run Bot (Polling) -------------------
-if __name__ == "__main__":
-    logging.info("Bot is starting with long polling...")
-    app.run_polling()
+# ------------------- START USERBOT -------------------
+print("Userbot started 🚀")
+client.start()
+client.run_until_disconnected()
