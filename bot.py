@@ -3,6 +3,7 @@ import yt_dlp
 import logging
 import json
 import subprocess
+import imageio_ffmpeg as ffmpeg
 from telethon import TelegramClient, events
 from telethon.tl.types import DocumentAttributeVideo
 
@@ -24,13 +25,17 @@ if COOKIE_TXT_CONTENT:
         f.write(COOKIE_TXT_CONTENT)
     logging.info("Cookies file created")
 
+# FFmpeg & FFprobe binary paths from imageio-ffmpeg
+FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
+FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()  # ffprobe is included
+
 # ------------------------------
 # VIDEO METADATA (ffprobe)
 # ------------------------------
 def get_video_info(path):
     """Returns duration, width, height for Telegram streaming."""
     cmd = [
-        "ffprobe", "-v", "quiet", "-print_format", "json",
+        FFPROBE_BIN, "-v", "quiet", "-print_format", "json",
         "-show_streams", path
     ]
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -65,9 +70,9 @@ def download_video(url: str) -> str:
     # Re-mux for Telegram streaming (moov atom at start)
     streamed_file = "streamable.mp4"
     cmd = [
-        "ffmpeg", "-i", filename,
+        FFMPEG_BIN, "-i", filename,
         "-c", "copy",
-        "-movflags", "faststart",  # ensures video is streamable
+        "-movflags", "faststart",
         streamed_file
     ]
     subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -111,7 +116,7 @@ async def handler(event):
                     supports_streaming=True
                 )
             ],
-            force_document=False,   # IMPORTANT!!!
+            force_document=False,
         )
 
         await event.reply("Uploaded as STREAMABLE video ✔")
