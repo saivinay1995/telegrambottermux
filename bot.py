@@ -1,116 +1,70 @@
 import os
-import yt_dlp
 import logging
-import json
 import subprocess
-from telethon import TelegramClient, events
-from telethon.tl.types import DocumentAttributeVideo
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telethon import TelegramClient
 
 logging.basicConfig(level=logging.INFO)
 
-# ------------------------------
-# ENV VARIABLES
-# ------------------------------
-API_ID = int(os.environ["API_ID"])
-API_HASH = os.environ["API_HASH"]
-SESSION = os.environ.get("SESSION", "userbot")
-COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+SESSION = "session_data"
 
-# Create cookies.txt if provided
-COOKIES_FILE = None
-if COOKIE_TXT_CONTENT:
-    COOKIES_FILE = "cookies.txt"
-    with open(COOKIES_FILE, "w") as f:
-        f.write(COOKIE_TXT_CONTENT)
-    logging.info("Cookies file created")
+TELETHON_CLIENT = TelegramClient(SESSION, API_ID, API_HASH)
 
-# ------------------------------
-# VIDEO METADATA (ffprobe)
-# ------------------------------
-def get_video_info(path):
-    """Returns duration, width, height for Telegram streaming."""
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL") + "/webhook"
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Send any YouTube link to download!")
+
+
+async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text
+
+    await update.message.reply_text("Downloading...")
+
+    output = "/data/video.mp4"
+
     cmd = [
-        "ffprobe", "-v", "quiet", "-print_format", "json",
-        "-show_streams", path
+        "yt-dlp",
+        "-f", "best",
+        "-o", output,
+        url
     ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    info = json.loads(result.stdout)
 
-    for stream in info["streams"]:
-        if stream["codec_type"] == "video":
-            duration = float(stream.get("duration", 0))
-            width = stream.get("width", 0)
-            height = stream.get("height", 0)
-            return duration, width, height
+    subprocess.run(cmd)
 
-    return 0, 0, 0  # fallback
+    if not os.path.exists(output):
+        return await update.message.reply_text("Download failed!")
 
-# ------------------------------
-# DOWNLOAD VIDEO USING YT-DLP
-# ------------------------------
-def download_video(url: str) -> str:
-    ydl_opts = {
-        "outtmpl": "video.%(ext)s",
-        "format": "bestvideo+bestaudio/best",
-        "merge_output_format": "mp4",
-        "noplaylist": True,
-    }
-    if COOKIES_FILE:
-        ydl_opts["cookiefile"] = COOKIES_FILE
+    await update.message.reply_text("Uploading to Saved Messages...")
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
+    async with TELETHON_CLIENT:
+        await TELETHON_CLIENT.send_file("me", output)
 
-    return filename
+    return await update.message.reply_text("Done! Check your Saved Messages.")
 
-# ------------------------------
-# TELETHON USERBOT CLIENT
-# ------------------------------
-client = TelegramClient(SESSION, API_ID, API_HASH)
 
-# ------------------------------
-# MESSAGE HANDLER
-# ------------------------------
-@client.on(events.NewMessage(outgoing=False))
-async def handler(event):
-    url = event.message.message.strip()
+async def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    if not url.startswith("http"):
-        return
+    await app.bot.set_webhook(WEBHOOK_URL)
 
-    await event.reply("Downloading... ⏳")
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT, download))
 
-    try:
-        filepath = download_video(url)
-        duration, width, height = get_video_info(filepath)
+    await TELETHON_CLIENT.connect()
 
-        await client.send_file(
-            "me",  # Saved Messages
-            filepath,
-            caption="Streamable video 🚀",
-            attributes=[
-                DocumentAttributeVideo(
-                    duration=duration,
-                    w=width,
-                    h=height,
-                    supports_streaming=True
-                )
-            ],
-            force_document=False,   # IMPORTANT!!!
-        )
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", 10000)),
+        webhook_url=WEBHOOK_URL,
+    )
 
-        await event.reply("Uploaded as STREAMABLE video ✔")
 
-    except Exception as e:
-        await event.reply(f"Error: {e}")
-    finally:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-
-# ------------------------------
-# START USERBOT
-# ------------------------------
-print("Userbot Started...")
-client.start()
-client.run_until_disconnected()
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
