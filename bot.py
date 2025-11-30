@@ -10,15 +10,14 @@ from telethon.tl.types import DocumentAttributeVideo
 logging.basicConfig(level=logging.INFO)
 
 # ------------------------------
-# TELEGRAM API CONFIG
+# ENV VARIABLES
 # ------------------------------
-API_ID = int(os.environ["API_ID"])      # Keep API_ID & API_HASH as env variables
+API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
-
-SESSION_FILE = "user"  # Hardcoded session filename (user.session)
-
-# Optional cookies
+SESSION = os.environ.get("SESSION", "userbot")
 COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
+
+# Create cookies.txt if provided
 COOKIES_FILE = None
 if COOKIE_TXT_CONTENT:
     COOKIES_FILE = "cookies.txt"
@@ -26,17 +25,14 @@ if COOKIE_TXT_CONTENT:
         f.write(COOKIE_TXT_CONTENT)
     logging.info("Cookies file created")
 
-# ------------------------------
-# FFmpeg & FFprobe paths
-# ------------------------------
+# FFmpeg & FFprobe from imageio-ffmpeg
 FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
 FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()  # ffprobe included
 
 # ------------------------------
-# Video metadata (ffprobe)
+# VIDEO METADATA (ffprobe)
 # ------------------------------
 def get_video_info(path):
-    """Returns duration, width, height for Telegram streaming."""
     cmd = [
         FFPROBE_BIN, "-v", "quiet", "-print_format", "json",
         "-show_streams", path
@@ -51,10 +47,10 @@ def get_video_info(path):
             height = stream.get("height", 0)
             return duration, width, height
 
-    return 0, 0, 0  # fallback
+    return 0, 0, 0
 
 # ------------------------------
-# Download video + make streamable
+# DOWNLOAD VIDEO USING YT-DLP
 # ------------------------------
 def download_video(url: str) -> str:
     ydl_opts = {
@@ -70,34 +66,33 @@ def download_video(url: str) -> str:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
 
-    # Remux with ffmpeg to make Telegram streamable
-    streamed_file = "streamable.mp4"
+    # Remux with FFmpeg to make it streamable
+    streamable_file = "streamable.mp4"
     cmd = [
         FFMPEG_BIN, "-i", filename,
         "-c", "copy",
         "-movflags", "faststart",
-        streamed_file
+        streamable_file
     ]
     subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Remove original downloaded file
+    # Remove original download
     if os.path.exists(filename):
         os.remove(filename)
 
-    return streamed_file
+    return streamable_file
 
 # ------------------------------
-# Telethon client
+# TELETHON USERBOT CLIENT
 # ------------------------------
-client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+client = TelegramClient(SESSION, API_ID, API_HASH)
 
 # ------------------------------
-# Message handler
+# MESSAGE HANDLER
 # ------------------------------
 @client.on(events.NewMessage(outgoing=False))
 async def handler(event):
     url = event.message.message.strip()
-
     if not url.startswith("http"):
         return
 
@@ -131,8 +126,8 @@ async def handler(event):
             os.remove(filepath)
 
 # ------------------------------
-# Start userbot
+# START USERBOT
 # ------------------------------
 print("Userbot Started...")
-client.start()  # Uses hardcoded user.session
+client.start()
 client.run_until_disconnected()
