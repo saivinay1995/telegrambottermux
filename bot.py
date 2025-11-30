@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 
-SESSION_FILE = "user"  # Hardcoded user.session must exist
+SESSION_FILE = "user"  # Must exist in directory
 COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
 
 # ------------------------------
@@ -32,10 +32,10 @@ if COOKIE_TXT_CONTENT:
 # FFmpeg / FFprobe
 # ------------------------------
 FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
-FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()  # ffprobe included
+FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()
 
 # ------------------------------
-# Video metadata
+# Video metadata (duration, resolution)
 # ------------------------------
 def get_video_info(path):
     if not os.path.exists(path):
@@ -43,67 +43,71 @@ def get_video_info(path):
         return 0, 0, 0
 
     cmd = [
-        FFPROBE_BIN,
-        "-v", "quiet",
+        FFPROBE_BIN, "-v", "quiet",
         "-print_format", "json",
         "-show_streams",
         path
     ]
+
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        if not result.stdout:
-            logging.warning("ffprobe returned empty output")
-            return 0, 0, 0
+        info = json.loads(result.stdout or "{}")
 
-        info = json.loads(result.stdout)
         for stream in info.get("streams", []):
             if stream.get("codec_type") == "video":
                 duration = float(stream.get("duration", 0))
                 width = stream.get("width", 0)
                 height = stream.get("height", 0)
                 return duration, width, height
-    except Exception as e:
-        logging.error(f"ffprobe error: {e}")
+    except:
         return 0, 0, 0
 
     return 0, 0, 0
 
 # ------------------------------
-# Download + make streamable
+# Download + remux to FASTSTART MP4
 # ------------------------------
 def download_video(url: str) -> str:
+
+    # -------------------------------
+    # yt-dlp download
+    # -------------------------------
     ydl_opts = {
         "outtmpl": "video.%(ext)s",
-        "format": "bestaudio[ext=m4a]+bestvideo[ext=mp4]/best",
+        "format": "best",
         "merge_output_format": "mp4",
         "noplaylist": True,
         "ignoreerrors": True,
-        "quiet": True,
+        "quiet": True
     }
+
     if COOKIES_FILE:
         ydl_opts["cookiefile"] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        original_filename = ydl.prepare_filename(info)
-        # store original video name for reply
-        download_video.last_video_name = info.get("title", os.path.basename(original_filename))
+        original_file = ydl.prepare_filename(info)
+        download_video.last_title = info.get("title", os.path.basename(original_file))
 
-    # Remux to streamable mp4
-    streamable_file = "streamable.mp4"
+    # -------------------------------
+    # Remux to STREAMABLE MP4 using faststart
+    # -------------------------------
+    final_path = os.path.abspath("streamable.mp4")
+
     cmd = [
-        FFMPEG_BIN, "-i", original_filename,
-        "-c", "copy",
-        "-movflags", "faststart",
-        streamable_file
+        FFMPEG_BIN, "-i", original_file,
+        "-c:v", "copy", "-c:a", "copy",
+        "-movflags", "+faststart",
+        final_path
     ]
+
     subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Remove original download
-    if os.path.exists(original_filename):
-        os.remove(original_filename)
+    if not os.path.exists(final_path):
+        raise Exception("FFmpeg failed to create streamable.mp4")
 
-    return streamable_file
+    os.remove(original_file)
+    return final_path
 
 # ------------------------------
 # TELETHON CLIENT
@@ -113,9 +117,10 @@ client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
 # ------------------------------
 # Message handler
 # ------------------------------
-@client.on(events.NewMessage(outgoing=True))  # listens to your own messages
+@client.on(events.NewMessage(outgoing=True))
 async def handler(event):
     url = event.message.message.strip()
+
     if not url.startswith("http"):
         return
 
@@ -124,12 +129,12 @@ async def handler(event):
     try:
         filepath = download_video(url)
         duration, width, height = get_video_info(filepath)
-        video_name = download_video.last_video_name
+        video_name = download_video.last_title
 
         await client.send_file(
-            "me",  # Saved Messages
+            "me",
             filepath,
-            caption=f"{video_name}",
+            caption=video_name,
             attributes=[
                 DocumentAttributeVideo(
                     duration=duration,
@@ -138,14 +143,14 @@ async def handler(event):
                     supports_streaming=True
                 )
             ],
-            force_document=False,
+            force_document=False
         )
 
-        # Send original video name in reply
-        await event.reply(f"Uploaded video: `{video_name}` ✔")
+        await event.reply(f"Uploaded: {video_name}")
 
     except Exception as e:
         await event.reply(f"Error: {e}")
+
     finally:
         if os.path.exists(filepath):
             os.remove(filepath)
@@ -154,5 +159,5 @@ async def handler(event):
 # START USERBOT
 # ------------------------------
 print("Userbot Started...")
-client.start()  # Uses hardcoded user.session
+client.start()
 client.run_until_disconnected()
