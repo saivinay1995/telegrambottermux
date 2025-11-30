@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 
-SESSION_FILE = "user"  # hardcoded, user.session must be in same folder
+SESSION_FILE = "user"  # Hardcoded user.session must exist in project root
 COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
 
 # ------------------------------
@@ -29,7 +29,7 @@ if COOKIE_TXT_CONTENT:
     logging.info("Cookies file created")
 
 # ------------------------------
-# FFmpeg & FFprobe
+# FFmpeg / FFprobe
 # ------------------------------
 FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
 FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()  # ffprobe included
@@ -38,19 +38,33 @@ FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()  # ffprobe included
 # Video metadata
 # ------------------------------
 def get_video_info(path):
-    cmd = [
-        FFPROBE_BIN, "-v", "quiet", "-print_format", "json",
-        "-show_streams", path
-    ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    info = json.loads(result.stdout)
+    if not os.path.exists(path):
+        logging.warning(f"File not found: {path}")
+        return 0, 0, 0
 
-    for stream in info["streams"]:
-        if stream["codec_type"] == "video":
-            duration = float(stream.get("duration", 0))
-            width = stream.get("width", 0)
-            height = stream.get("height", 0)
-            return duration, width, height
+    cmd = [
+        FFPROBE_BIN,
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        path
+    ]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        if not result.stdout:
+            logging.warning("ffprobe returned empty output")
+            return 0, 0, 0
+
+        info = json.loads(result.stdout)
+        for stream in info.get("streams", []):
+            if stream.get("codec_type") == "video":
+                duration = float(stream.get("duration", 0))
+                width = stream.get("width", 0)
+                height = stream.get("height", 0)
+                return duration, width, height
+    except Exception as e:
+        logging.error(f"ffprobe error: {e}")
+        return 0, 0, 0
 
     return 0, 0, 0
 
@@ -95,7 +109,7 @@ client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
 # ------------------------------
 # Message handler
 # ------------------------------
-@client.on(events.NewMessage(outgoing=True))  # listen to own messages
+@client.on(events.NewMessage(outgoing=True))  # listens to your own messages
 async def handler(event):
     url = event.message.message.strip()
     if not url.startswith("http"):
@@ -134,5 +148,5 @@ async def handler(event):
 # START USERBOT
 # ------------------------------
 print("Userbot Started...")
-client.start()  # uses user.session
+client.start()  # Uses hardcoded user.session
 client.run_until_disconnected()
