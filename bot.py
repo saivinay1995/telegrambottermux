@@ -1,81 +1,116 @@
 import os
 import yt_dlp
 import logging
+import json
+import subprocess
 from telethon import TelegramClient, events
+from telethon.tl.types import DocumentAttributeVideo
 
 logging.basicConfig(level=logging.INFO)
 
+# ------------------------------
+# ENV VARIABLES
+# ------------------------------
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
-
+SESSION = os.environ.get("SESSION", "userbot")
 COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
-SESSION = "user.session"
 
-# Write cookies file if provided
+# Create cookies.txt if provided
 COOKIES_FILE = None
 if COOKIE_TXT_CONTENT:
     COOKIES_FILE = "cookies.txt"
     with open(COOKIES_FILE, "w") as f:
         f.write(COOKIE_TXT_CONTENT)
-    logging.info("Cookies.txt created.")
+    logging.info("Cookies file created")
 
-client = TelegramClient(SESSION, API_ID, API_HASH)
+# ------------------------------
+# VIDEO METADATA (ffprobe)
+# ------------------------------
+def get_video_info(path):
+    """Returns duration, width, height for Telegram streaming."""
+    cmd = [
+        "ffprobe", "-v", "quiet", "-print_format", "json",
+        "-show_streams", path
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    info = json.loads(result.stdout)
 
+    for stream in info["streams"]:
+        if stream["codec_type"] == "video":
+            duration = float(stream.get("duration", 0))
+            width = stream.get("width", 0)
+            height = stream.get("height", 0)
+            return duration, width, height
 
-# ------------------- DOWNLOAD VIDEO -------------------
+    return 0, 0, 0  # fallback
+
+# ------------------------------
+# DOWNLOAD VIDEO USING YT-DLP
+# ------------------------------
 def download_video(url: str) -> str:
     ydl_opts = {
         "outtmpl": "video.%(ext)s",
         "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
-        "noplaylist": True
+        "noplaylist": True,
     }
     if COOKIES_FILE:
         ydl_opts["cookiefile"] = COOKIES_FILE
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        return ydl.prepare_filename(info)
+        filename = ydl.prepare_filename(info)
 
+    return filename
 
-# ------------------- STREAM UPLOAD -------------------
-async def stream_upload(filepath):
-    """
-    Uploads file to Saved Messages (Telegram cloud) using streaming.
-    Works for 2GB+ files.
-    """
-    await client.send_file(
-        "me",
-        filepath,
-        caption="Uploaded via userbot stream 🚀",
-        force_document=True,
-        part_size_kb=512,   # streaming chunk size
-        supports_streaming=True
-    )
+# ------------------------------
+# TELETHON USERBOT CLIENT
+# ------------------------------
+client = TelegramClient(SESSION, API_ID, API_HASH)
 
+# ------------------------------
+# MESSAGE HANDLER
+# ------------------------------
+@client.on(events.NewMessage(outgoing=False))
+async def handler(event):
+    url = event.message.message.strip()
 
-# ------------------- MESSAGE LISTENER -------------------
-@client.on(events.NewMessage(pattern=r"http"))
-async def url_handler(event):
-    url = event.raw_text.strip()
+    if not url.startswith("http"):
+        return
 
-    await event.reply("Downloading video… ⏳")
+    await event.reply("Downloading... ⏳")
 
     try:
-        file_path = download_video(url)
-        await event.reply("Uploading to Saved Messages… ☁️")
+        filepath = download_video(url)
+        duration, width, height = get_video_info(filepath)
 
-        await stream_upload(file_path)
+        await client.send_file(
+            "me",  # Saved Messages
+            filepath,
+            caption="Streamable video 🚀",
+            attributes=[
+                DocumentAttributeVideo(
+                    duration=duration,
+                    w=width,
+                    h=height,
+                    supports_streaming=True
+                )
+            ],
+            force_document=False,   # IMPORTANT!!!
+        )
 
-        await event.reply("Done! Check your Saved Messages ✅")
+        await event.reply("Uploaded as STREAMABLE video ✔")
+
     except Exception as e:
         await event.reply(f"Error: {e}")
     finally:
-        if os.path.exists("video.mp4"):
-            os.remove("video.mp4")
+        if os.path.exists(filepath):
+            os.remove(filepath)
 
-
-# ------------------- START USERBOT -------------------
-print("Userbot started 🚀")
+# ------------------------------
+# START USERBOT
+# ------------------------------
+print("Userbot Started...")
 client.start()
 client.run_until_disconnected()
