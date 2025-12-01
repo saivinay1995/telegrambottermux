@@ -6,6 +6,8 @@ import subprocess
 import imageio_ffmpeg as ffmpeg
 from telethon import TelegramClient, events
 from telethon.tl.types import DocumentAttributeVideo
+from flask import Flask
+import threading
 
 logging.basicConfig(level=logging.INFO)
 
@@ -32,7 +34,7 @@ if COOKIE_TXT_CONTENT:
 # FFmpeg / FFprobe
 # ------------------------------
 FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
-FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()
+FFPROBE_BIN = ffmpeg.get_ffprobe_exe()  # Fixed: Use correct FFprobe binary
 
 # ------------------------------
 # Video metadata
@@ -173,8 +175,23 @@ async def handler(event):
             os.remove(filepath)
 
 # ------------------------------
+# Simple Web Server for Render
+# ------------------------------
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# ------------------------------
 # Start
 # ------------------------------
 print("Userbot Started...")
+# Start web server in a separate thread
+threading.Thread(target=run_web_server, daemon=True).start()
 client.start()
 client.run_until_disconnected()
