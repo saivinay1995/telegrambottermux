@@ -1,3 +1,4 @@
 telethon
 yt-dlp
 imageio-ffmpeg
+flask

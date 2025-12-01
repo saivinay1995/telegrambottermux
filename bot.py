@@ -3,11 +3,26 @@ import yt_dlp
 import logging
 import json
 import subprocess
+import threading
+from flask import Flask
 import imageio_ffmpeg as ffmpeg
 from telethon import TelegramClient, events
 from telethon.tl.types import DocumentAttributeVideo
 
 logging.basicConfig(level=logging.INFO)
+
+# ------------------------------
+# FLASK SERVER (for Render Free Web Service)
+# ------------------------------
+app = Flask(__name__)
+
+@app.get("/")
+def home():
+    return "Userbot Running Successfully"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 # ------------------------------
 # TELEGRAM CONFIG
@@ -19,7 +34,7 @@ SESSION_FILE = "user"
 COOKIE_TXT_CONTENT = os.environ.get("COOKIE_TXT_CONTENT")
 
 # ------------------------------
-# Cookies support
+# Cookies
 # ------------------------------
 COOKIES_FILE = None
 if COOKIE_TXT_CONTENT:
@@ -29,17 +44,14 @@ if COOKIE_TXT_CONTENT:
     logging.info("Cookies file created")
 
 # ------------------------------
-# FFmpeg / FFprobe
+# FFmpeg
 # ------------------------------
 FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
 FFPROBE_BIN = ffmpeg.get_ffmpeg_exe()
 
-# ------------------------------
-# Video metadata
-# ------------------------------
+
 def get_video_info(path):
     if not os.path.exists(path):
-        logging.warning(f"File not found: {path}")
         return 0, 0, 0
 
     cmd = [
@@ -59,17 +71,15 @@ def get_video_info(path):
                 width = stream.get("width", 0)
                 height = stream.get("height", 0)
                 return duration, width, height
-
     except:
         return 0, 0, 0
 
     return 0, 0, 0
 
 # ------------------------------
-# Download + FASTSTART remux
+# Download video
 # ------------------------------
 def download_video(url: str) -> str:
-
     ydl_opts = {
         "outtmpl": "video.%(ext)s",
         "format": "best",
@@ -87,52 +97,45 @@ def download_video(url: str) -> str:
         original_file = ydl.prepare_filename(info)
         download_video.last_title = info.get("title", os.path.basename(original_file))
 
-    # Convert to streamable faststart MP4
     final_path = os.path.abspath("streamable.mp4")
 
     cmd = [
         FFMPEG_BIN, "-i", original_file,
-        "-c:v", "copy", "-c:a", "copy",
+        "-c:v", "copy",
+        "-c:a", "copy",
         "-movflags", "+faststart",
         final_path
     ]
-
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    if not os.path.exists(final_path):
-        raise Exception("FFmpeg failed to create streamable.mp4")
+    subprocess.run(cmd)
 
     os.remove(original_file)
     return final_path
 
 # ------------------------------
-# TELETHON CLIENT
+# TELETHON BOT
 # ------------------------------
 client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
 
-# ------------------------------
-# Message Handler
-# ------------------------------
 @client.on(events.NewMessage(outgoing=True))
 async def handler(event):
-    url = event.message.message.strip()
+    url = event.raw_text.strip()
 
     if not url.startswith("http"):
         return
 
-    await event.reply("Downloading... ⏳")
+    await event.reply("Downloading...")
 
-    filepath = None  # <<< FIXED
+    filepath = None
 
     try:
         filepath = download_video(url)
         duration, width, height = get_video_info(filepath)
-        video_name = download_video.last_title
+        title = download_video.last_title
 
         await client.send_file(
             "me",
             filepath,
-            caption=video_name,     # send REAL video name
+            caption=title,
             attributes=[
                 DocumentAttributeVideo(
                     duration=duration,
@@ -140,23 +143,28 @@ async def handler(event):
                     h=height,
                     supports_streaming=True
                 )
-            ],
-            force_document=False
+            ]
         )
 
-        await event.reply(f"Uploaded: {video_name}")
+        await event.reply(f"Uploaded: {title}")
 
     except Exception as e:
         await event.reply(f"Error: {e}")
 
     finally:
-        # <<< FIXED SAFE DELETE
         if filepath and os.path.exists(filepath):
             os.remove(filepath)
 
+
+def start_telethon():
+    client.start()
+    client.run_until_disconnected()
+
+
 # ------------------------------
-# Start
+# RUN BOTH (Flask + Telethon)
 # ------------------------------
-print("Userbot Started...")
-client.start()
-client.run_until_disconnected()
+print("Starting free Render-compatible userbot...")
+
+threading.Thread(target=run_flask).start()
+threading.Thread(target=start_telethon).start()
