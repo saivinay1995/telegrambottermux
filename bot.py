@@ -34,7 +34,7 @@ if COOKIE_TXT_CONTENT:
 # FFmpeg / FFprobe
 # ------------------------------
 FFMPEG_BIN = ffmpeg.get_ffmpeg_exe()
-FFPROBE_BIN = ffmpeg.get_ffprobe_exe()  # Fixed: Use correct FFprobe binary
+FFPROBE_BIN = os.path.join(os.path.dirname(FFMPEG_BIN), 'ffprobe')  # Derive FFprobe path from FFmpeg
 
 # ------------------------------
 # Video metadata
