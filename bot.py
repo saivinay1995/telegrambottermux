@@ -60,8 +60,10 @@ def get_video_info(path):
                 height = stream.get("height", 0)
                 return duration, width, height
 
-    except:
-        return 0, 0, 0
+    except subprocess.CalledProcessError as e:
+        logging.error(f"FFprobe error: {e.stderr.decode()}")
+    except Exception as e:
+        logging.error(f"Unexpected error in get_video_info: {e}")
 
     return 0, 0, 0
 
@@ -69,26 +71,37 @@ def get_video_info(path):
 # Download + FASTSTART remux
 # ------------------------------
 def download_video(url: str) -> str:
-
     ydl_opts = {
         "outtmpl": "video.%(ext)s",
         "format": "best",
         "merge_output_format": "mp4",
         "noplaylist": True,
-        "ignoreerrors": True,
-        "quiet": True
+        # Removed "ignoreerrors": True and "quiet": True for debugging
     }
 
     if COOKIES_FILE:
         ydl_opts["cookiefile"] = COOKIES_FILE
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        original_file = ydl.prepare_filename(info)
-        download_video.last_title = info.get("title", os.path.basename(original_file))
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logging.info(f"Extracting info for URL: {url}")
+            info = ydl.extract_info(url, download=True)
+            if not info:
+                raise Exception("Failed to extract video info")
+            original_file = ydl.prepare_filename(info)
+            download_video.last_title = info.get("title", os.path.basename(original_file))
+            logging.info(f"Downloaded: {original_file}")
+    except Exception as e:
+        logging.error(f"yt-dlp error: {e}")
+        raise
 
-    # Convert to streamable faststart MP4
-    final_path = os.path.abspath("streamable.mp4")
+    # Sanitize title for filename (remove invalid chars)
+    safe_title = "".join(c for c in download_video.last_title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+    if not safe_title:
+        safe_title = "video"
+
+    # Convert to streamable faststart MP4 with actual title
+    final_path = os.path.abspath(f"{safe_title}.mp4")
 
     cmd = [
         FFMPEG_BIN, "-i", original_file,
@@ -97,7 +110,12 @@ def download_video(url: str) -> str:
         final_path
     ]
 
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        logging.info("FFmpeg remux completed")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise Exception("FFmpeg remux failed")
 
     if not os.path.exists(final_path):
         raise Exception("FFmpeg failed to create streamable.mp4")
@@ -122,7 +140,7 @@ async def handler(event):
 
     await event.reply("Downloading... ⏳")
 
-    filepath = None  # <<< FIXED
+    filepath = None
 
     try:
         filepath = download_video(url)
@@ -132,7 +150,7 @@ async def handler(event):
         await client.send_file(
             "me",
             filepath,
-            caption=video_name,     # send REAL video name
+            caption=video_name,
             attributes=[
                 DocumentAttributeVideo(
                     duration=duration,
@@ -147,10 +165,10 @@ async def handler(event):
         await event.reply(f"Uploaded: {video_name}")
 
     except Exception as e:
+        logging.error(f"Handler error: {e}")
         await event.reply(f"Error: {e}")
 
     finally:
-        # <<< FIXED SAFE DELETE
         if filepath and os.path.exists(filepath):
             os.remove(filepath)
 
