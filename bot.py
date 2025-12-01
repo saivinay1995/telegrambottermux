@@ -9,6 +9,7 @@ from telethon.tl.types import DocumentAttributeVideo
 from flask import Flask
 import threading
 
+
 logging.basicConfig(level=logging.INFO)
 
 # ------------------------------
